@@ -16,14 +16,14 @@ var ErrNotFound = fmt.Errorf("record does not exist")
 type hashIndex map[string]int64
 
 type Db struct {
-	out *os.File
-	outPath string
+	out       *os.File
+	outPath   string
 	outOffset int64
 
 	index hashIndex
 }
 
-func NewDb(dir string) (*Db, error) {
+func Open(dir string) (*Db, error) {
 	outputPath := filepath.Join(dir, outFileName)
 	f, err := os.OpenFile(outputPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o600)
 	if err != nil {
@@ -55,7 +55,7 @@ func (db *Db) recover() error {
 	for err == nil {
 		var (
 			header, data []byte
-			n int
+			n            int
 		)
 		header, err = in.Peek(bufSize)
 		if err == io.EOF {
@@ -128,4 +128,12 @@ func (db *Db) Put(key, value string) error {
 		db.outOffset += int64(n)
 	}
 	return err
+}
+
+func (db *Db) Size() (int64, error) {
+	info, err := db.out.Stat()
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
 }

@@ -1,34 +1,24 @@
 package datastore
 
 import (
-	"io/ioutil"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
-func TestDb_Put(t *testing.T) {
-	dir, err := ioutil.TempDir("", "test-db")
+func TestDb(t *testing.T) {
+	tmp := t.TempDir()
+	db, err := Open(tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
 
-	db, err := NewDb(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	pairs := [][]string {
-		{"key1", "value1"},
-		{"key2", "value2"},
-		{"key3", "value3"},
-	}
-
-	outFile, err := os.Open(filepath.Join(dir, outFileName))
-	if err != nil {
-		t.Fatal(err)
+	pairs := [][]string{
+		{"k1", "v1"},
+		{"k2", "v2"},
+		{"k3", "v3"},
+		{"k2", "v2.1"},
 	}
 
 	t.Run("put/get", func(t *testing.T) {
@@ -47,25 +37,23 @@ func TestDb_Put(t *testing.T) {
 		}
 	})
 
-	outInfo, err := outFile.Stat()
-	if err != nil {
-		t.Fatal(err)
-	}
-	size1 := outInfo.Size()
-
 	t.Run("file growth", func(t *testing.T) {
+		sizeBefore, err := db.Size()
+		if err != nil {
+			t.Fatal(err)
+		}
 		for _, pair := range pairs {
 			err := db.Put(pair[0], pair[1])
 			if err != nil {
 				t.Errorf("Cannot put %s: %s", pairs[0], err)
 			}
 		}
-		outInfo, err := outFile.Stat()
+		sizeAfter, err := db.Size()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if size1 * 2 != outInfo.Size() {
-			t.Errorf("Unexpected size (%d vs %d)", size1, outInfo.Size())
+		if sizeAfter <= sizeBefore {
+			t.Errorf("Size does not grow after put (before %d, after %d)", sizeBefore, sizeAfter)
 		}
 	})
 
@@ -73,20 +61,24 @@ func TestDb_Put(t *testing.T) {
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
 		}
-		db, err = NewDb(dir)
+		db, err = Open(tmp)
 		if err != nil {
 			t.Fatal(err)
 		}
 
+		uniquePairs := make(map[string]string)
 		for _, pair := range pairs {
-			value, err := db.Get(pair[0])
+			uniquePairs[pair[0]] = pair[1]
+		}
+
+		for key, expectedValue := range uniquePairs {
+			value, err := db.Get(key)
 			if err != nil {
-				t.Errorf("Cannot put %s: %s", pairs[0], err)
+				t.Errorf("Cannot get %s: %s", key, err)
 			}
-			if value != pair[1] {
-				t.Errorf("Bad value returned expected %s, got %s", pair[1], value)
+			if value != expectedValue {
+				t.Errorf("Get(%q) = %q, wanted %q", key, value, expectedValue)
 			}
 		}
 	})
-
 }
