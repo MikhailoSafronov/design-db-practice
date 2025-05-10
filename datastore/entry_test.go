@@ -18,13 +18,28 @@ func TestEntry_Encode(t *testing.T) {
 }
 
 func TestReadValue(t *testing.T) {
-	e := entry{"key", "test-value"}
-	data := e.Encode()
-	v, err := readValue(bufio.NewReader(bytes.NewReader(data)))
+	var (
+		a, b entry
+	)
+	a = entry{"key", "test-value"}
+	originalBytes := a.Encode()
+
+	b.Decode(originalBytes)
+	t.Log("encode/decode", a, b)
+	if a != b {
+		t.Error("Encode/Decode mismatch")
+	}
+
+	b = entry{}
+	n, err := b.DecodeFromReader(bufio.NewReader(bytes.NewReader(originalBytes)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != "test-value" {
-		t.Errorf("Got bat value [%s]", v)
+	t.Log("encode/decodeFromReader", a, b)
+	if a != b {
+		t.Error("Encode/DecodeFromReader mismatch")
+	}
+	if n != len(originalBytes) {
+		t.Errorf("DecodeFromReader() read %d bytes, expected %d", n, len(originalBytes))
 	}
 }

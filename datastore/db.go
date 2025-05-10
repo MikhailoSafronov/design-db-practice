@@ -2,7 +2,7 @@ package datastore
 
 import (
 	"bufio"
-	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,7 +17,6 @@ type hashIndex map[string]int64
 
 type Db struct {
 	out       *os.File
-	outPath   string
 	outOffset int64
 
 	index hashIndex
@@ -30,9 +29,8 @@ func Open(dir string) (*Db, error) {
 		return nil, err
 	}
 	db := &Db{
-		outPath: outputPath,
-		out:     f,
-		index:   make(hashIndex),
+		out:   f,
+		index: make(hashIndex),
 	}
 	err = db.recover()
 	if err != nil && err != io.EOF {
@@ -41,49 +39,29 @@ func Open(dir string) (*Db, error) {
 	return db, nil
 }
 
-const bufSize = 8192
-
 func (db *Db) recover() error {
-	input, err := os.Open(db.outPath)
+	f, err := os.Open(db.out.Name())
 	if err != nil {
 		return err
 	}
-	defer input.Close()
+	defer f.Close()
 
-	var buf [bufSize]byte
-	in := bufio.NewReaderSize(input, bufSize)
+	in := bufio.NewReader(f)
 	for err == nil {
 		var (
-			header, data []byte
-			n            int
+			record entry
+			n      int
 		)
-		header, err = in.Peek(bufSize)
-		if err == io.EOF {
-			if len(header) == 0 {
-				return err
-			}
-		} else if err != nil {
-			return err
-		}
-		size := binary.LittleEndian.Uint32(header)
-
-		if size < bufSize {
-			data = buf[:size]
-		} else {
-			data = make([]byte, size)
-		}
-		n, err = in.Read(data)
-
-		if err == nil {
-			if n != int(size) {
+		n, err = record.DecodeFromReader(in)
+		if errors.Is(err, io.EOF) {
+			if n != 0 {
 				return fmt.Errorf("corrupted file")
 			}
-
-			var e entry
-			e.Decode(data)
-			db.index[e.key] = db.outOffset
-			db.outOffset += int64(n)
+			break
 		}
+
+		db.index[record.key] = db.outOffset
+		db.outOffset += int64(n)
 	}
 	return err
 }
@@ -98,7 +76,7 @@ func (db *Db) Get(key string) (string, error) {
 		return "", ErrNotFound
 	}
 
-	file, err := os.Open(db.outPath)
+	file, err := os.Open(db.out.Name())
 	if err != nil {
 		return "", err
 	}
@@ -109,12 +87,11 @@ func (db *Db) Get(key string) (string, error) {
 		return "", err
 	}
 
-	reader := bufio.NewReader(file)
-	value, err := readValue(reader)
-	if err != nil {
+	var record entry
+	if _, err = record.DecodeFromReader(bufio.NewReader(file)); err != nil {
 		return "", err
 	}
-	return value, nil
+	return record.value, nil
 }
 
 func (db *Db) Put(key, value string) error {

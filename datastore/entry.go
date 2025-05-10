@@ -3,16 +3,21 @@ package datastore
 import (
 	"bufio"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
 )
 
 type entry struct {
 	key, value string
 }
 
+// 0           4    8     kl+8  kl+12     <-- offset
+// (full size) (kl) (key) (vl)  (value)
+// 4           4    ....  4     .....     <-- length
+
 func (e *entry) Encode() []byte {
-	kl := len(e.key)
-	vl := len(e.value)
+	kl, vl := len(e.key), len(e.value)
 	size := kl + vl + 12
 	res := make([]byte, size)
 	binary.LittleEndian.PutUint32(res, uint32(size))
@@ -24,46 +29,30 @@ func (e *entry) Encode() []byte {
 }
 
 func (e *entry) Decode(input []byte) {
-	kl := binary.LittleEndian.Uint32(input[4:])
-	keyBuf := make([]byte, kl)
-	copy(keyBuf, input[8:kl+8])
-	e.key = string(keyBuf)
-
-	vl := binary.LittleEndian.Uint32(input[kl+8:])
-	valBuf := make([]byte, vl)
-	copy(valBuf, input[kl+12:kl+12+vl])
-	e.value = string(valBuf)
+	e.key = decodeString(input[4:])
+	e.value = decodeString(input[len(e.key)+8:])
 }
 
-func readValue(in *bufio.Reader) (string, error) {
-	header, err := in.Peek(8)
-	if err != nil {
-		return "", err
-	}
-	keySize := int(binary.LittleEndian.Uint32(header[4:]))
-	_, err = in.Discard(keySize + 8)
-	if err != nil {
-		return "", err
-	}
+func decodeString(v []byte) string {
+	l := binary.LittleEndian.Uint32(v)
+	buf := make([]byte, l)
+	copy(buf, v[4:4+int(l)])
+	return string(buf)
+}
 
-	header, err = in.Peek(4)
+func (e *entry) DecodeFromReader(in *bufio.Reader) (int, error) {
+	sizeBuf, err := in.Peek(4)
 	if err != nil {
-		return "", err
+		if errors.Is(err, io.EOF) {
+			return 0, err
+		}
+		return 0, fmt.Errorf("DecodeFromReader, cannot read size: %w", err)
 	}
-	valSize := int(binary.LittleEndian.Uint32(header))
-	_, err = in.Discard(4)
+	buf := make([]byte, int(binary.LittleEndian.Uint32(sizeBuf)))
+	n, err := in.Read(buf[:])
 	if err != nil {
-		return "", err
+		return n, fmt.Errorf("DecodeFromReader, cannot read record: %w", err)
 	}
-
-	data := make([]byte, valSize)
-	n, err := in.Read(data)
-	if err != nil {
-		return "", err
-	}
-	if n != valSize {
-		return "", fmt.Errorf("can't read value bytes (read %d, expected %d)", n, valSize)
-	}
-
-	return string(data), nil
+	e.Decode(buf)
+	return n, nil
 }
