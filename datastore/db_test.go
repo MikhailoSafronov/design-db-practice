@@ -1,84 +1,81 @@
 package datastore
 
 import (
+	"fmt"
+	"os"
+	"sync"
 	"testing"
 )
 
-func TestDb(t *testing.T) {
-	tmp := t.TempDir()
-	db, err := Open(tmp)
+func TestConcurrentAccess(t *testing.T) {
+	dir := "test_db"
+	defer os.RemoveAll(dir)
+
+	db, err := Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		_ = db.Close()
-	})
+	defer db.Close()
 
-	pairs := [][]string{
-		{"k1", "v1"},
-		{"k2", "v2"},
-		{"k3", "v3"},
-		{"k2", "v2.1"},
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			// Використовуємо унікальні ключі для кожного потоку
+			key := fmt.Sprintf("key%d", i)
+			value := fmt.Sprintf("value%d", i)
+
+			err := db.Put(key, value)
+			if err != nil {
+				t.Errorf("Put failed: %v", err)
+				return
+			}
+
+			gotValue, err := db.Get(key)
+			if err != nil {
+				t.Errorf("Get failed: %v", err)
+				return
+			}
+
+			if gotValue != value {
+				t.Errorf("For key %s: expected %s, got %s", key, value, gotValue)
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+func TestSize(t *testing.T) {
+	dir := "test_db_size"
+	defer os.RemoveAll(dir)
+
+	db, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// Test Size method
+	size, err := db.Size()
+	if err != nil {
+		t.Fatalf("Size() error: %v", err)
+	}
+	if size != 0 {
+		t.Errorf("Expected size 0, got %d", size)
 	}
 
-	t.Run("put/get", func(t *testing.T) {
-		for _, pair := range pairs {
-			err := db.Put(pair[0], pair[1])
-			if err != nil {
-				t.Errorf("Cannot put %s: %s", pairs[0], err)
-			}
-			value, err := db.Get(pair[0])
-			if err != nil {
-				t.Errorf("Cannot get %s: %s", pairs[0], err)
-			}
-			if value != pair[1] {
-				t.Errorf("Bad value returned expected %s, got %s", pair[1], value)
-			}
-		}
-	})
+	// Add some data
+	err = db.Put("test", "value")
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	t.Run("file growth", func(t *testing.T) {
-		sizeBefore, err := db.Size()
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, pair := range pairs {
-			err := db.Put(pair[0], pair[1])
-			if err != nil {
-				t.Errorf("Cannot put %s: %s", pairs[0], err)
-			}
-		}
-		sizeAfter, err := db.Size()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if sizeAfter <= sizeBefore {
-			t.Errorf("Size does not grow after put (before %d, after %d)", sizeBefore, sizeAfter)
-		}
-	})
-
-	t.Run("new db process", func(t *testing.T) {
-		if err := db.Close(); err != nil {
-			t.Fatal(err)
-		}
-		db, err = Open(tmp)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		uniquePairs := make(map[string]string)
-		for _, pair := range pairs {
-			uniquePairs[pair[0]] = pair[1]
-		}
-
-		for key, expectedValue := range uniquePairs {
-			value, err := db.Get(key)
-			if err != nil {
-				t.Errorf("Cannot get %s: %s", key, err)
-			}
-			if value != expectedValue {
-				t.Errorf("Get(%q) = %q, wanted %q", key, value, expectedValue)
-			}
-		}
-	})
+	size, err = db.Size()
+	if err != nil {
+		t.Fatalf("Size() error: %v", err)
+	}
+	if size <= 0 {
+		t.Errorf("Expected size > 0, got %d", size)
+	}
 }

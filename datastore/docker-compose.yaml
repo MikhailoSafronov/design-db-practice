@@ -1,0 +1,22 @@
+version: '3'
+services:
+  db:
+    build: .
+    command: /app/db
+    volumes:
+      - db_data:/data
+    ports:
+      - "8000:8000"
+  
+  server:
+    build: .
+    command: /app/server
+    environment:
+      DB_URL: "http://db:8000"
+    depends_on:
+      - db
+    ports:
+      - "8080:8080"
+
+volumes:
+  db_data:
