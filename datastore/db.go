@@ -494,3 +494,17 @@ func (e *entry) DecodeFromReader(r io.Reader) (int, error) {
 	e.value = string(buf[kl:])
 	return 8 + int(kl) + int(vl), nil
 }
+
+// PutInt64 зберігає int64 як string
+func (db *DB) PutInt64(key string, value int64) error {
+	return db.Put(key, strconv.FormatInt(value, 10))
+}
+
+// GetInt64 повертає значення як int64
+func (db *DB) GetInt64(key string) (int64, error) {
+	strVal, err := db.Get(key)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseInt(strVal, 10, 64)
+}
