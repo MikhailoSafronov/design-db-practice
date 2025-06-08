@@ -5,53 +5,54 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time" // ← NEW
 )
 
 func TestSegmentRotationAndMerge(t *testing.T) {
-	t.Setenv("SEG_MAX", "16384")
-	time.Sleep(time.Millisecond) // ← NEW: гарантуємо, що env підхопився
+	dir := "test_segment_rotation"
+	defer os.RemoveAll(dir)
 
-	dir := t.TempDir()
+	t.Setenv("SEG_MAX", "50")
+
 	db, err := Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer db.Close()
 
-	const n = 1000
-	for i := 0; i < n; i++ {
-		if err := db.Put(fmt.Sprintf("k%04d", i), "v"); err != nil {
+	// Записуємо дані для ротації
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("key%d", i)
+		value := strings.Repeat("v", 20)
+		if err := db.Put(key, value); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// читаємо всі ключі
-	for i := 0; i < n; i++ {
-		if _, err := db.Get(fmt.Sprintf("k%04d", i)); err != nil {
+	// Перевіряємо заморожені сегменти
+	if len(db.segments) == 0 {
+		t.Errorf("expected at least 1 frozen segment, got %d", len(db.segments))
+	}
+
+	// Виконуємо злиття
+	if err := db.merge(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Перевіряємо кількість сегментів після злиття
+	if len(db.segments) != 1 {
+		t.Errorf("expected 1 segment after merge, got %d", len(db.segments))
+	}
+
+	// Перевіряємо цілісність даних
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("key%d", i)
+		value, err := db.Get(key)
+		if err != nil {
 			t.Fatal(err)
 		}
-	}
-
-	// запускаємо merge без очікування тікера
-	_ = db.merge()
-
-	files, _ := os.ReadDir(dir)
-	segCnt := 0
-	for _, f := range files {
-		if segRE.MatchString(f.Name()) ||
-			strings.HasPrefix(f.Name(), "snapshot-") {
-			segCnt++
+		expected := strings.Repeat("v", 20)
+		if value != expected {
+			t.Errorf("expected %s, got %s", expected, value)
 		}
 	}
-	if segCnt != 1 {
-		t.Fatalf("expected 1 frozen segment, got %d", segCnt)
-	}
-
-	// ще раз перевіряємо читання
-	for i := 0; i < n; i++ {
-		if _, err := db.Get(fmt.Sprintf("k%04d", i)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	_ = db.Close()
 }
